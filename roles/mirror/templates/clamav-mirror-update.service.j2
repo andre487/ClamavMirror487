@@ -1,0 +1,19 @@
+[Unit]
+Description=Update ClamAV mirror and optional DNS advertisement
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=clamav-mirror
+Group=clamav-mirror
+Environment=HOME={{ mirror_home }}
+WorkingDirectory={{ mirror_home }}
+ExecStart=/usr/local/libexec/clamav-mirror-update --config /etc/clamav-mirror/config.json
+TimeoutStartSec=30min
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths={{ mirror_home }} {{ mirror_webroot }}

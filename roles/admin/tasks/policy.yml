@@ -1,0 +1,142 @@
+---
+- name: Finalize verified administrative key after bootstrap
+  ansible.builtin.include_tasks: account.yml
+  when: mirror_bootstrap_phase | default('') == 'policy'
+
+- name: Read current SSH connection context
+  ansible.builtin.command: printenv SSH_CONNECTION
+  become: false
+  changed_when: false
+  check_mode: false
+  register: mirror_ssh_connection
+
+- name: Read previous administrative SSH policy
+  ansible.builtin.stat:
+    path: /etc/ssh/sshd_config.d/00-clamavmirror-admin.conf
+  register: mirror_policy_stat
+
+- name: Preserve previous administrative SSH policy
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config.d/00-clamavmirror-admin.conf
+  register: mirror_policy_previous
+  when: mirror_policy_stat.stat.exists
+
+- name: Install and validate administrative SSH policy
+  block:
+    - name: Install global SSH authentication policy
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-clamavmirror-admin.conf
+        content: |
+          PermitRootLogin no
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Validate and reload administrative ssh policy
+
+    - name: Validate complete SSH configuration
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Inspect effective administrative SSH authentication
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -T
+          - -C
+          - "user={{ item }},host={{ ansible_facts['hostname'] }},addr={{ mirror_ssh_connection.stdout.split()[0] }},laddr={{ mirror_ssh_connection.stdout.split()[2] }},lport={{ mirror_ssh_connection.stdout.split()[3] }}"
+      loop:
+        - root
+        - "{{ mirror_admin.user }}"
+      register: mirror_effective_policy
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Require effective administrative SSH restrictions
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - "'permitrootlogin no' in item.stdout_lines"
+          - "'pubkeyauthentication yes' in item.stdout_lines"
+          - "'passwordauthentication no' in item.stdout_lines"
+          - "'kbdinteractiveauthentication no' in item.stdout_lines"
+        fail_msg: "An existing SSH configuration overrides the administrative policy"
+      loop: "{{ mirror_effective_policy.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: not ansible_check_mode
+  rescue:
+    - name: Restore previous administrative SSH policy
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-clamavmirror-admin.conf
+        content: "{{ mirror_policy_previous.content | b64decode }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: mirror_policy_stat.stat.exists
+
+    - name: Remove rejected administrative SSH policy
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/00-clamavmirror-admin.conf
+        state: absent
+      when: not mirror_policy_stat.stat.exists
+
+    - name: Report rejected administrative SSH policy
+      ansible.builtin.fail:
+        msg: "Administrative SSH policy validation failed; the previous policy was restored"
+
+- name: Find previously managed administrative accounts
+  ansible.builtin.find:
+    paths: /etc/sudoers.d
+    patterns: clamavmirror-*
+    file_type: file
+  register: mirror_admin_sudoers
+
+- name: Identify retired administrative logins
+  ansible.builtin.set_fact:
+    mirror_retired_admins: >-
+      {{ mirror_admin_sudoers.files | map(attribute='path') | map('basename')
+         | map('regex_replace', '^clamavmirror-', '') | reject('equalto', mirror_admin.user) | list }}
+
+- name: Require verified new administrator before retiring old access
+  ansible.builtin.assert:
+    that:
+      - ansible_user == mirror_admin.user
+      - item is match('^[a-z_][a-z0-9_-]*$')
+      - item != 'root'
+    fail_msg: "Administrative migration must run through the new verified administrative account"
+  loop: "{{ mirror_retired_admins }}"
+
+- name: Inspect retired administrative accounts
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ item }}"]
+  loop: "{{ mirror_retired_admins }}"
+  register: mirror_retired_admin_accounts
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Close sessions of retired administrators
+  ansible.builtin.command:
+    argv: [pkill, -KILL, -u, "{{ item.item }}"]
+  loop: "{{ mirror_retired_admin_accounts.results }}"
+  when: item.rc == 0
+  register: mirror_retired_admin_sessions
+  failed_when: mirror_retired_admin_sessions.rc not in [0, 1]
+  changed_when: mirror_retired_admin_sessions.rc == 0
+
+- name: Remove retired administrative accounts while preserving their files
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: false
+  loop: "{{ mirror_retired_admins }}"
+
+- name: Remove retired administrative sudo privileges
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/clamavmirror-{{ item }}"
+    state: absent
+  loop: "{{ mirror_retired_admins }}"

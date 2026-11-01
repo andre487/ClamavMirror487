@@ -1,0 +1,37 @@
+- name: Verify mirror
+  hosts: clamav_mirrors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check timer and web server
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop: [caddy, clamav-mirror-update.timer]
+      changed_when: false
+    - name: Verify HTTPS and HTTP Range support from controller
+      ansible.builtin.uri:
+        url: "{{ item }}://{{ mirror_domain }}/daily.cvd"
+        headers:
+          Range: bytes=0-31
+        status_code: 206
+        return_content: true
+        timeout: 20
+        use_proxy: false
+      loop: [https, http]
+      delegate_to: localhost
+      become: false
+      register: mirror_range
+      retries: 12
+      delay: 5
+      until: mirror_range is succeeded
+    - name: Require complete requested byte range
+      ansible.builtin.assert:
+        that: item.content | length == 32
+        quiet: true
+      loop: "{{ mirror_range.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+    - name: Check DNS advertisement through Yandex Cloud API
+      ansible.builtin.command:
+        argv: [/usr/local/libexec/clamav-mirror-update, --config, /etc/clamav-mirror/config.json, --verify-dns]
+      become_user: clamav-mirror
+      changed_when: false

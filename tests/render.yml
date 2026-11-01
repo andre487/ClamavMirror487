@@ -1,0 +1,9 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm inventory example disables cloud dependency
+      ansible.builtin.assert:
+        that: not mirror_dns.enabled
+  vars:
+    mirror_dns:
+      enabled: false

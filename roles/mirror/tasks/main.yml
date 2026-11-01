@@ -1,0 +1,105 @@
+- name: Install mirror runtime
+  ansible.builtin.apt:
+    name: [caddy, clamav-cvdupdate]
+    state: present
+    policy_rc_d: 101
+    lock_timeout: 600
+
+- name: Create update account
+  ansible.builtin.user:
+    name: clamav-mirror
+    system: true
+    home: "{{ mirror_home }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+
+- name: Allow web server to traverse mirror home
+  ansible.builtin.file:
+    path: "{{ mirror_home }}"
+    state: directory
+    owner: clamav-mirror
+    group: clamav-mirror
+    mode: '0755'
+
+- name: Create database directory readable by Caddy
+  ansible.builtin.file:
+    path: "{{ mirror_webroot }}"
+    state: directory
+    owner: clamav-mirror
+    group: clamav-mirror
+    mode: '0755'
+
+- name: Create private configuration directory
+  ansible.builtin.file:
+    path: /etc/clamav-mirror
+    state: directory
+    owner: root
+    group: clamav-mirror
+    mode: '0750'
+
+- name: Install updater configuration
+  ansible.builtin.copy:
+    dest: /etc/clamav-mirror/config.json
+    content: "{{ {'home': mirror_home, 'webroot': mirror_webroot, 'proxy': mirror_proxy, 'dns': mirror_dns} | to_nice_json }}
+"
+    owner: root
+    group: clamav-mirror
+    mode: '0640'
+  no_log: true
+  diff: false
+
+- name: Create executable directory
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    mode: '0755'
+
+- name: Install updater
+  ansible.builtin.copy:
+    src: updater.py
+    dest: /usr/local/libexec/clamav-mirror-update
+    owner: root
+    mode: '0755'
+
+- name: Configure Caddy
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: caddy
+    mode: '0644'
+    validate: /usr/bin/caddy validate --config %s --adapter caddyfile
+  notify: Reload Caddy
+
+- name: Install update service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: '0644'
+  loop: [clamav-mirror-update.service, clamav-mirror-update.timer]
+  register: mirror_units
+
+- name: Enable Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Reload update units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: mirror_units.changed and not ansible_check_mode
+
+- name: Update databases and optional DNS
+  ansible.builtin.systemd_service:
+    name: clamav-mirror-update.service
+    state: started
+  when: not ansible_check_mode
+
+- name: Enable periodic database updates
+  ansible.builtin.systemd_service:
+    name: clamav-mirror-update.timer
+    enabled: true
+    state: "{{ 'restarted' if mirror_units.changed else 'started' }}"
+  when: not ansible_check_mode

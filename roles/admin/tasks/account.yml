@@ -1,0 +1,53 @@
+---
+- name: Validate administrative access
+  ansible.builtin.assert:
+    that:
+      - mirror_admin.user != "root"
+      - mirror_admin.public_key | length > 0
+    fail_msg: "A non-root administrator and its public key are required"
+
+- name: Create or update administrative user
+  ansible.builtin.user:
+    name: "{{ mirror_admin.user }}"
+    state: present
+    create_home: true
+    password: '!'
+    update_password: on_create
+    groups: sudo
+    append: true
+  register: mirror_admin_account
+
+- name: Create administrative SSH directory
+  ansible.builtin.file:
+    path: "{{ mirror_admin_account.home }}/.ssh"
+    state: directory
+    owner: "{{ mirror_admin.user }}"
+    mode: "0700"
+
+- name: Install administrative public key
+  ansible.builtin.lineinfile:
+    path: "{{ mirror_admin_account.home }}/.ssh/authorized_keys"
+    line: "{{ mirror_admin.public_key }}"
+    create: true
+    owner: "{{ mirror_admin.user }}"
+    mode: "0600"
+  when: mirror_bootstrap_phase | default('') == 'account'
+  no_log: true
+
+- name: Replace verified administrative public key
+  ansible.builtin.copy:
+    dest: "{{ mirror_admin_account.home }}/.ssh/authorized_keys"
+    content: "{{ mirror_admin.public_key }}\n"
+    owner: "{{ mirror_admin.user }}"
+    mode: "0600"
+  when: mirror_bootstrap_phase | default('') != 'account'
+  no_log: true
+
+- name: Allow non-interactive administration through sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/clamavmirror-{{ mirror_admin.user }}"
+    content: "{{ mirror_admin.user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s

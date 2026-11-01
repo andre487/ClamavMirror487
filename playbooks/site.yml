@@ -1,0 +1,20 @@
+- name: Provision ClamAV mirror
+  hosts: clamav_mirrors
+  become: true
+  roles:
+    - role: common
+    - role: admin
+    - role: firewall
+    - role: mirror
+  pre_tasks:
+    - name: Validate mirror inventory
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution in ['Debian', 'Ubuntu']
+          - ansible_user == mirror_admin.user and mirror_admin.user != 'root'
+          - mirror_domain is match('^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$')
+          - mirror_email is match('^[^\s]+@[^\s]+$')
+          - mirror_webroot is match('^/[a-zA-Z0-9/_.-]+$')
+          - mirror_home is match('^/[a-zA-Z0-9/_.-]+$')
+          - not mirror_dns.enabled or (mirror_dns.zone_id | length > 0 and mirror_dns.record_name | length > 0)
+      no_log: true

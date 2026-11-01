@@ -1,0 +1,14 @@
+{
+    email {{ mirror_email }}
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+{{ mirror_domain }} {
+    root * {{ mirror_webroot }}
+    file_server browse
+}
+
+http://{{ mirror_domain }} {
+    root * {{ mirror_webroot }}
+    file_server
+}

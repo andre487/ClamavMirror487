@@ -1,0 +1,20 @@
+all:
+  children:
+    clamav_mirrors:
+      vars:
+        ansible_user: deploy
+        mirror_unattended_upgrades: true
+      hosts:
+        example:
+          ansible_host: 203.0.113.10
+          mirror_domain: mirror.example.com
+          mirror_email: admin@example.com
+          mirror_webroot: /var/lib/clamav-mirror/database
+          mirror_home: /var/lib/clamav-mirror
+          mirror_update_interval: 30min
+          mirror_dns:
+            enabled: false
+          mirror_proxy: {}
+          mirror_admin:
+            user: deploy
+            public_key: ssh-ed25519 REPLACE_WITH_ADMIN_PUBLIC_KEY

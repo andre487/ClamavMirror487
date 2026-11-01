@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically update ClamAV mirror
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ mirror_update_interval }}
+RandomizedDelaySec=30s
+Unit=clamav-mirror-update.service
+
+[Install]
+WantedBy=timers.target

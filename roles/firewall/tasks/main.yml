@@ -1,0 +1,15 @@
+- name: Allow SSH and mirror web ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["{{ ansible_port | default(22) }}", '80', '443']
+- name: Allow outgoing connections
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+- name: Enable firewall with incoming deny policy
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+    state: enabled
