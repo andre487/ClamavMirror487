@@ -2,6 +2,7 @@ all:
   children:
     clamav_mirrors:
       vars:
+        ansible_python_interpreter: /usr/bin/python3
         ansible_user: deploy
         mirror_unattended_upgrades: true
       hosts:
